@@ -27,6 +27,18 @@ Per *the agent validates first; the human does final acceptance* (`docs/REVIEW.m
 - **Real path on the target, not a mock (NON-NEGOTIABLE for G5).** Your mocked suite proves wiring and is necessary, but it CANNOT prove the real integration path (real credentials, real external calls, real completion signals). The keystone dogfood is green only after the **real** path completes end-to-end **on the deployed/real target** to terminal success, driven through the operator's own entry point. If the *local* environment cannot complete a real run, report "local could not complete → confirming on target" and make the **target** run the gating evidence.
 - **The deploy smoke is not validation.** "Deployed, services active, routes respond" is a precondition, not G1/G5. After any deploy, drive ≥1 real end-to-end run of the phase's headline capability on the target to terminal success before reporting the validation/dogfood gates green. If you can't, the gate is ⛔ (name why), never ✅.
 
+## Fail fast — time-box each scenario; capture-and-move-on, don't grind
+
+You are a focused, **lower-capacity** subagent inside a larger orchestration; the main agent runs on a stronger model, holds the whole-phase picture, and exists to help you through exactly the walls you can't clear alone. You own the diagnose→capture loop for a failing scenario, but you do **not** grind on one indefinitely. Grinding silently is the failure mode this kills (a verify agent once churned ~an hour on a stuck check instead of escalating in minutes).
+
+- **Time-box each scenario.** A few focused minutes of diagnosis with no root cause → stop, **capture it as a finding** (best-guess root cause + the file + "needs deeper look"), and move to the next scenario. Don't let one stuck scenario eat the whole validation pass.
+- **Cap retries.** Re-running a scenario after a *changed hypothesis* is progress; re-running it unchanged is a loop. Bound every command with a timeout; a hang is a result to report, not something to wait out.
+- **Escalate (don't decide alone) on:** a scenario you can't even get to *run* after bounded effort, an environment/credential gap you can't resolve, an ambiguity about whether something is a real failure or expected, or any decision above your scope — surface it in `findings`/`blocked` and return rather than churning.
+
+A complete scenario map (✅/⛔/➖ + crisp findings) returned promptly is the whole value; deep root-causing of a hard failure is something the main agent + a builder finish — your job is to surface it precisely, fast.
+
+- **Evidence pack (the operator's acceptance handoff).** Capture evidence of **every surface/capability the phase touched** — screenshots (signed in, realistic state) for UI, run links / terminal-success output for backend flows — and save it under `docs/phase-reviews/assets/phase-<n>/`, referencing each item from its scenario's evidence. A UI scenario ✅ without its screenshot is half-evidence — the pack is what the operator accepts against *before* the exit workflow runs.
+
 ## What to return
 
 Per scenario: ✅ pass (with evidence — run id, link, HTTP status, screenshot) / ⛔ blocked (naming the human gesture) / ➖ n/a. Plus any bug you found as a structured finding (root cause + file + severity) so the orchestrator can open an `(FB-n)`. State blockers explicitly.

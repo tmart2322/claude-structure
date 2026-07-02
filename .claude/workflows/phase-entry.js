@@ -9,9 +9,11 @@ export const meta = {
 }
 
 // args: { phase: "2", phaseDocPath: "docs/phases/phase-2-*.md", branch: "phase/2" }
-const phaseId = args.phase
-const phaseDocPath = args.phaseDocPath
-const branch = args.branch || `phase/${phaseId}`
+// Some harness paths deliver `args` as a JSON string — normalize before reading.
+const A = typeof args === 'string' ? JSON.parse(args) : args || {}
+const phaseId = A.phase
+const phaseDocPath = A.phaseDocPath
+const branch = A.branch || `phase/${phaseId}`
 
 phase('Survey')
 const [repoMap, plan] = await parallel([
@@ -24,10 +26,14 @@ const [repoMap, plan] = await parallel([
     ),
   () =>
     agent(
-      `Read ${phaseDocPath} + docs/TENETS.md + docs/PROJECT.md and produce a build plan tailored to phase ${phaseId}. ` +
+      `Read ${phaseDocPath} + docs/NORTH_STARS.md + docs/TENETS.md + docs/ENGINEERING_TENETS.md + docs/PROJECT.md ` +
+        `and produce a build plan tailored to phase ${phaseId}. ` +
         `Frame it as discrete, mostly-independent build chunks suitable for parallel subagent delegation, grouped into ` +
         `waves that serialize where data forces it (schema/migrations/shared types land first). For each chunk give: a ` +
-        `one-line brief, a tight NON-overlapping files: glob, whether it is UI, and whether it is architecturally hard. ` +
+        `one-line brief, a tight NON-overlapping files: glob, whether it is UI, whether it is architecturally hard ` +
+        `(hard: true — runs on a stronger model), and whether it is security-/integrity-critical enough to warrant a ` +
+        `targeted post-integrate spot-review (reviewFirst: true — auth/session, data isolation, money/safety paths, ` +
+        `public endpoints). ` +
         `Enumerate every data-model change (tables/columns/fields) this phase introduces so the schema can be recorded.\n\n` +
         `OWNERSHIP-FIRST (do this BEFORE writing any route/file glob): for every new entity AND every new operator ` +
         `surface this phase introduces, answer one question — WHO OWNS IT? That single answer drives THREE things that ` +
@@ -61,12 +67,14 @@ const result = await agent(
     `     (every deliverable maps to a north star by name), open questions, risk-register delta, prior-phase`,
     `     exit findings carried in, and a sharpened definition-of-done from the phase's Exit criteria.`,
     `  2. docs/phase-reviews/phase-${phaseId}-tasks.md — one [ ] line per build chunk (brief + files: glob),`,
-    `     grouped by wave. NO validation scenarios here — those are exit gate G1.`,
+    `     grouped by wave, with a trailing \` · hard\` and/or \` · review-first\` marker where the plan flags it`,
+    `     (the flags must survive a crash: the orchestrator rebuilds wave dispatches FROM THE LEDGER, so a flag`,
+    `     only in prose is a flag lost). NO validation scenarios here — those are exit gate G1.`,
     `  3. docs/phase-reviews/phase-${phaseId}-exit.md — DRAFT skeleton: gate ledger G1-G11 all ⬜ + the`,
     `     Validation table seeded from the phase doc's Verification scenarios (each ⬜). Empty analysis headers.`,
     `  4. docs/phase-reviews/phase-${phaseId}-operator-steps.md — Before/During/Validation/After gestures.`,
     `  5. docs/BACKLOG.md — pull every accepted row with Phase=${phaseId} into the ledger as [ ] lines (keep`,
-    `     the B-NNN id + severity) and move those rows to the Pulled table. (If a living schema/ops doc exists,`,
+    `     the backlog id + severity) and move those rows to the Pulled table. (If a living schema/ops doc exists,`,
     `     add this phase's planned data-model changes to it.)`,
     ``,
     `Cite tenets/north stars BY NAME, not number. Commit all artifacts together (the atomic Stage-1 checkpoint) and`,

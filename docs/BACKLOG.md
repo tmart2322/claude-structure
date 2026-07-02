@@ -14,14 +14,14 @@ exit review  ──proposed items (Phase column)──▶  operator approves/re-
                                                               accepted rows where Phase == n  ──pulled──▶  phase-<n>-tasks.md  [ ]
 ```
 
-- **In (exit → backlog).** A phase exit review emits a **Proposed backlog items** table — one row per item it surfaced but didn't finish, each with a proposed **Phase**. The operator approves or re-assigns (minimum human-in-the-loop). On approval the rows are appended to **Active backlog** below as `accepted` with a sequential `B-NNN` id.
-- **Out (backlog → phase ledger).** When `/phase-builder <n>` starts phase `<n>` (entry review), it reads this file, takes every `accepted` row whose **Phase** is `<n>`, seeds each as a `[ ]` line in `docs/phase-reviews/phase-<n>-tasks.md` (carrying the `B-NNN` id + severity), and moves the row from **Active** to **Pulled** below. Nothing is pulled silently — the pull lands in the entry-review commit.
+- **In (exit → backlog).** A phase exit review emits a **Proposed backlog items** table — one row per item it surfaced but didn't finish, each with a proposed **Phase**. The operator approves or re-assigns (minimum human-in-the-loop). On approval the rows are appended to **Active backlog** below as `accepted` with a namespaced `<SRC>-NNN` id.
+- **Out (backlog → phase ledger).** When `/phase-builder <n>` starts phase `<n>` (entry review), it reads this file, takes every `accepted` row whose **Phase** is `<n>`, seeds each as a `[ ]` line in `docs/phase-reviews/phase-<n>-tasks.md` (carrying the backlog id + severity), and moves the row from **Active** to **Pulled** below. Nothing is pulled silently — the pull lands in the entry-review commit.
 - **N/A.** Items deliberately not tied to a phase (do-anytime doc fixes, someday/maybe, ops notes) sit under **Active** with Phase `N/A`. They never auto-pull but stay visible; close them by moving to **Dropped**/**Done** with a note.
 
 ## Conventions
 
-- **ID** — sequential `B-NNN`, never reused. New rows take the next number.
-- **Phase** — a phase number, or `N/A`. This is the only field the pull mechanism keys on.
+- **ID** — namespaced **`<SRC>-NNN`**, never reused: `<SRC>` is a short (2–4 char) id of the *surfacing context* — usually the phase that surfaced the item (e.g. `FND-001` from a foundation phase; `OPS-001` for an ad-hoc operator note). Namespacing by surfacer makes each phase a single-writer id space, so two parallel sessions never collide on "the next number" (the failure a single global counter guarantees eventually).
+- **Phase** — the **target**: a real, still-upcoming phase number, or `N/A`. This is the only field the pull mechanism keys on — free text ("fast-follow") or an already-finished phase can never be pulled and silently orphans the row.
 - **Severity** — `HIGH` / `MED` / `LOW` (mirrors the per-phase ledger). `—` for items with no risk dimension (pure scope, e.g. a future feature).
 - **Status** — `proposed` (awaiting operator approval) · `accepted` (approved, awaiting its phase) · `pulled` (moved into a phase ledger — see Pulled section) · `done` · `dropped` (with a reason).
 - **Source** — where the item came from (`phase-1-exit`, an ad-hoc note, etc.) so its provenance is never lost.
@@ -32,7 +32,7 @@ exit review  ──proposed items (Phase column)──▶  operator approves/re-
 
 | ID | Item | Phase | Sev | Source | Status |
 |---|---|---|---|---|---|
-| <!-- B-001 | example deferred item | 2 | MED | phase-1-exit | accepted --> | | | | | |
+| <!-- FND-001 | example deferred item | 2 | MED | phase-1-exit | accepted --> | | | | | |
 
 _(Empty to start. Exit reviews append rows here. Delete the commented example once you have real rows.)_
 

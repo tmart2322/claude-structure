@@ -16,7 +16,7 @@ Use these as the structure for `docs/phase-reviews/phase-<n>-{entry,exit,operato
 
 ## Tenets re-read
 
-Notes from re-reading `docs/TENETS.md`:
+Notes from re-reading the three principle files (`docs/NORTH_STARS.md` + `docs/TENETS.md` + `docs/ENGINEERING_TENETS.md`):
 
 - Tenets this phase is at material risk of bending — and what mitigates that risk.
 - Tenets whose meaning has shifted since the prior phase.
@@ -104,7 +104,7 @@ The phase doc's Verification scenarios live here as **gate G1** — exit items, 
 
 ## Operator notes & feedback
 
-What the operator flags as not-working — here or inline in operator-steps as `> FEEDBACK: ...`. Each is triaged on the next `/phase-builder <n>` run into a **current-phase task** (`(FB-n)` in the ledger, built *before* re-entering this review), a **backlog item**, or checked off as resolved. This is gate G9.
+What the operator flags as not-working — here or inline in operator-steps as `> FEEDBACK: ...`. **The acceptance pass happens at the pre-exit seam**, on the pre-acceptance validation handoff (scenario results + evidence pack), *before* the exit workflow runs. Each note is triaged on the next `/phase-builder <n>` run into a **current-phase task** (`(FB-n)` in the ledger, built *before* re-entering this review), a **backlog item**, or checked off as resolved. This is gate G9.
 
 | FB | Note | Source | Triage → | Status |
 |---|---|---|---|---|
@@ -154,7 +154,7 @@ Patterns that bit repeatedly this phase. Each is a candidate to convert into a m
 
 ## Proposed backlog items
 
-Every item this phase surfaced but didn't finish, as a table with a **Phase** column (target phase, or `N/A`). Operator-approved, then appended to [`BACKLOG.md`](../BACKLOG.md) as `accepted` — this is gate G10. Nothing stays only in this review's prose.
+Every item this phase surfaced but didn't finish, as a table with a **Phase** column (target phase, or `N/A`). Operator-approved, then appended to [`BACKLOG.md`](../BACKLOG.md) as `accepted` — this is gate G10. Nothing stays only in this review's prose. **Phase must be a real, still-upcoming phase or `N/A` — never free text or a finished phase** (the round-trip pulls by exact match; anything else is silently orphaned).
 
 | ID | Item | Phase | Severity | Status |
 |---|---|---|---|---|
@@ -189,7 +189,8 @@ Lives at `docs/phase-reviews/phase-<n>-operator-steps.md` — the operator's at-
 ## After — post-build → phase complete
 | ID | Step | Human? | Status |
 |---|---|---|---|
-| — | Review the exit review's gate ledger + give "what's not working" notes | yes | |
+| — | **Accept the pre-exit validation handoff** (scenario results + evidence pack) + give "what's not working" notes (gate G9 — this happens *before* the exit workflow runs) | yes | |
+| — | Review the exit review's gate ledger; approve the proposed backlog rows (gate G10) | yes | |
 | — | Approve / open the phase PR (exit gate G11) | yes | |
 | — | Merge the PR (closeout already staged in it) → phase complete; the merge commit is the record (no follow-up PR) | yes | |
 ```

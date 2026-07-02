@@ -22,6 +22,10 @@ Tailor to the project's threat model (see `docs/TENETS.md` + `docs/ARCHITECTURE.
 - **Secrets** — no plaintext secrets, no forbidden key env vars, the encrypted-secrets mechanism used; redaction-by-construction in logs (privacy-safe logging).
 - **Injection / SSRF / deserialization** — raw SQL outside migrations, unvalidated outbound fetch targets, untrusted input crossing a boundary without validation.
 
+## Fail fast — time-box; partial-with-the-gap-named beats stalling
+
+You are one bounded lens in a larger orchestration; the main agent is there to help you reason. Time-box the review and bound any command (the diff computation, `security-review`, the secret-scan) with a timeout. If the diff is too large to finish, a section won't resolve to a verdict, or you need context you don't have, **return the findings you DID reach plus an explicit list of what you could not review and why** — a partial review with the gap named is far more useful than silence or an hour of churn. Never re-run the same inconclusive analysis hoping for a different result; surface the blocker and return.
+
 ## What to return
 
 A compact findings list — `file:line`, the issue, severity (critical / high / med / low), and an exploit sketch or why it's safe. State "none" if clean. You write **no files**.

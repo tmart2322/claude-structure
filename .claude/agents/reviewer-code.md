@@ -21,6 +21,10 @@ Read `docs/PROJECT.md#things-that-bite` for the repo-specific traps. Universally
 - **Idempotency under retry** — a step that can re-execute must make create-style side effects (open a PR, insert a row) find-or-create / upsert, or the run mis-reports its terminal state.
 - **Scoping / isolation** — the project's data-scoping invariant applied to every query; never bypassed.
 
+## Fail fast — time-box; partial-with-the-gap-named beats stalling
+
+You are one bounded lens in a larger orchestration; the main agent is there to help you reason. Time-box the review and bound any command (the diff computation, `code-review`/`simplify`) with a timeout. If the diff is too large to finish, a section won't resolve to a verdict, or you need context you don't have, **return the findings you DID reach plus an explicit list of what you could not review and why** — a partial review with the gap named is far more useful than silence or an hour of churn. Never re-run the same inconclusive analysis hoping for a different result; surface the blocker and return.
+
 ## What to return
 
 A compact list of findings — each with `file:line`, a one-line description, severity (correctness > efficiency > nit), and confidence. State "none" per lens if clean. You write **no files**.

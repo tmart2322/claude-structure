@@ -1,11 +1,11 @@
 ---
 name: phase-builder
-description: Drives end-to-end execution of a single numbered phase from docs/phases/phase-N-*.md. A thin orchestrator — it dispatches three background workflows (phase-entry, phase-wave, phase-exit) that fan out to specialized doer subagents, owns the operator decision seams (entry go/no-go; exit acceptance + PR gates), keeps its own context lean by reading only compact workflow summaries, and is fully resumable across crashes via the committed task ledger + exit gate ledger. Use whenever the user asks to build, run, execute, ship, or work through an entire numbered phase ("/phase-builder 2", "let's build phase 2", "kick off phase 3") — not for one-off changes within a phase already underway.
+description: Drives end-to-end execution of a single numbered phase from docs/phases/phase-N-*.md. A thin orchestrator — it dispatches three background workflows (phase-entry, phase-wave, phase-exit) that fan out to specialized doer subagents, owns the operator decision seams (entry go/no-go; the pre-exit acceptance pass on a validated build + evidence pack; the PR gates), keeps its own context lean by reading only compact workflow summaries, and is fully resumable across crashes via the committed task ledger + exit gate ledger. Use whenever the user asks to build, run, execute, ship, or work through an entire numbered phase ("/phase-builder 2", "let's build phase 2", "kick off phase 3") — not for one-off changes within a phase already underway.
 ---
 
 # Phase builder
 
-Drives one numbered phase of the build, end to end. Phases are defined in `docs/phases/phase-<n>-*.md`. The principles you build against live in `docs/TENETS.md` (north stars are priorities; design tenets are invariants). The review system that gates each phase is in `docs/REVIEW.md`. The concrete commands, layout, and invariants for *this* project live in `docs/PROJECT.md` — the doer subagents read it; you don't need to memorize it.
+Drives one numbered phase of the build, end to end. Phases are defined in `docs/phases/phase-<n>-*.md`. The principles you build against live in **three files**: `docs/NORTH_STARS.md` (priorities, ordered), `docs/TENETS.md` (the project's product invariants + how the layers interact), and `docs/ENGINEERING_TENETS.md` (the transferable engineering invariants) — reviews read all three, citing by name. The review system that gates each phase is in `docs/REVIEW.md`. The concrete commands, layout, and invariants for *this* project live in `docs/PROJECT.md` — the doer subagents read it; you don't need to memorize it.
 
 You are a **thin orchestrator.** Almost all of the work — research, building, testing, validating, reviewing, deploying, doc-syncing — is done by **background workflows** that fan out to **specialized doer subagents** and hand you back a compact, schema-validated summary. Your job is to drive the state machine, own the operator seams, and **keep your own context lean.** **Read summaries, never raw build/test/deploy output.** A workflow's structured verdict plus a committed ledger line is the evidence — don't re-read the files the doers changed back into your own context to "double-check." (Doing everything inline is the trap this design exists to prevent — it burns the main agent's whole context window on one phase.)
 
@@ -15,12 +15,18 @@ The user invokes you with a phase id like `2`, `0a`, `3b`. If it's missing or am
 
 **Three workflows** (`.claude/workflows/`) — each runs in the background and returns a tight summary:
 - **`phase-entry`** — maps the repo + plans the build (parallel Explore + Plan), then synthesizes & commits the Stage-1 checkpoint: entry review, task ledger, exit-review skeleton, operator-steps, and the backlog pull.
-- **`phase-wave`** — builds one wave: build + cover-with-tests + verify each chunk in parallel **isolated git worktrees**, then a single serial integrator cherry-picks each verified chunk onto the phase branch with an **atomic code + ledger-flip commit.** Idempotent: pass only the still-open chunks.
+- **`phase-wave`** — builds one wave: build + cover-with-tests + verify each chunk in **isolated git worktrees** (capped at `maxParallel`, default 2), then a single serial integrator **merges each verified chunk onto the phase branch** and flips its ledger line in an **immediately-paired commit** (the recovery checkpoint), finishing with the project's gate sweep + lint on the branch tip (merges skip pre-commit hooks) and a targeted **spot-review** (security + correctness) of any ` · review-first`/` · hard` chunk. Idempotent: pass only the still-open chunks.
 - **`phase-exit`** — runs the automatable exit gates in parallel (verify · validate · tenets · review · security · docs) and returns their verdicts.
 
 **The doer subagents** (`.claude/agents/`): builders `builder` · `ui-builder` (optional); tester `tester`; read-only reviewers `reviewer-tenets` · `reviewer-code` · `reviewer-security`; ops `verifier` · `validator` · `deployer` (optional) · `doc-syncer`. The workflows dispatch these — you rarely call one directly. Call one directly only for a one-off (e.g. `deployer` to refresh the target before an exit run, or `reviewer-tenets` for a mid-build sanity check).
 
 **Two skills** the doers use: `tenet-check` (the G3+G4 scorecard) and `gate-check` (the CI-mirroring gate sweep that includes lint).
+
+## Lower agents fail fast; YOU help them reason
+
+The doer subagents run on **smaller models than you** and are each scoped to a narrow job. They are instructed to **fail fast** — cap retries, time-box, bound commands with timeouts, and **escalate a crisp blocker rather than grind alone** (a verify agent once churned ~an hour on a stuck check instead of returning in minutes). So **expect — and welcome — early `status:failed` / `blocked` / `needsAttention` returns carrying a specific question.** That is not the agent underperforming; it is the design working: a low-capacity agent hitting a wall it can't see around should hand it up, not brute-force it.
+
+When a blocked result comes back, **it's your turn** — you have more capacity and the whole-phase picture. Help it through the wall instead of just re-running it: answer the ambiguity, re-scope or split the chunk smaller, fix the blocker yourself, or re-dispatch with `chunk.hard=true` (runs the chunk on a stronger model). The smell to watch is the *opposite* of a fast blocker — **a workflow that's been running unusually long with no return**: a background workflow can't surface a stuck sub-agent mid-run, so if a wave/exit is taking far longer than its chunks should, inspect it rather than assuming progress. (This is *why* the fail-fast discipline lives in the agent definitions — it's the only place that can stop the grind before the workflow returns.)
 
 ## The state machine
 
@@ -31,22 +37,35 @@ ENTRY   Workflow('phase-entry', {phase, phaseDocPath, branch})
         → present the entry review + ledger + risks      ──⏸ OPERATOR go/no-go
 │
 BUILD   per wave, lowest-numbered open wave first:
-        read the ledger → collect that wave's still-open chunks → Workflow('phase-wave', {phase, wave, branch, chunks})
-        → read the summary (integrated SHAs + needsAttention) → re-dispatch failed chunks / surface blockers
+        read the ledger → collect that wave's still-open chunks
+        → Workflow('phase-wave', {phase, wave, branch, chunks, maxParallel: 2})
+        → read the summary (integrated SHAs · gateSweep · spotFindings · testGaps · needsAttention)
+        → triage spotFindings BEFORE the next wave (fix-chunk / ledger line / backlog proposal)
+        → diagnose + re-dispatch failed chunks (help them reason — see below) / surface blockers
         → next wave.  (FB-n feedback tasks re-enter here.)
 │
-EXIT    LOCAL-FIRST — validate the whole loop on the local stack (the boot command in PROJECT.md) to green;
-        only THEN deploy (if the project deploys) AND drive a REAL end-to-end run of the headline capability
-        on the target to TERMINAL SUCCESS (not a smoke test)
-        → Workflow('phase-exit', {phase, base, head})
+VALIDATE (pre-acceptance — cheap, one agent)   LOCAL-FIRST: dispatch `validator` directly in the background:
+        drive the phase's Verification scenarios on the local stack to green + capture the EVIDENCE PACK
+        (screenshots of every touched surface / run links / terminal-success proof)
+        → record provisional G1 rows (🟦) in the exit review → present the acceptance handoff
+          ("here's what I validated, with the evidence; here's what's ⛔ and why")
+        ──⏸ OPERATOR ACCEPTANCE (the G9 seam — deliberately BEFORE the heavy exit workflow)
+        → each "not working" note → (FB-n) → back to BUILD → re-validate touched scenarios
+        → loop until the operator signs off on a build they've SEEN working
+│
+EXIT    deploy first (if the project deploys) + drive the headline capability on the target to
+        TERMINAL SUCCESS, then Workflow('phase-exit', {phase, base, head, skipValidate: true IFF the
+        branch tip is unchanged since the green pre-acceptance validate — any commit since means a fresh G1 run})
         → write the gate verdicts into phase-<n>-exit.md → present the gate ledger
-        ──⏸ OPERATOR  G9 acceptance · G10 backlog approval · G11 PR confirm (+ closeout staged on the PR) · operator merges
-        → operator feedback → add (FB-n) to ledger → back to BUILD → re-run affected gates
+        ──⏸ OPERATOR  G10 backlog approval · G11 PR confirm (+ closeout staged on the PR) · operator merges
+        → late findings → (FB-n) → back to BUILD → re-validate → re-run affected gates
         → loop until every gate G1–G11 is ✅/➖; the operator's merge of the PR completes the phase
           (the merge commit is the record — there is no G12 checkbox to flip, so no follow-up closeout PR).
 ```
 
-The `⏸` seams are the only places a human is in the loop — and the only places a workflow can't reach (workflows are non-interactive). Don't skip a stage to save time; the gates are how this project avoids locking in architectural mistakes (a required gate per `docs/REVIEW.md`, not a nice-to-have).
+The `⏸` seams are the only places a human is in the loop — and the only places a workflow can't reach (workflows are non-interactive). Don't skip a stage to save time; the gates are how this project avoids locking in architectural mistakes (a required gate per `docs/REVIEW.md`, not a nice-to-have). **The pre-acceptance VALIDATE stage exists so the operator never accepts a build the agent hasn't already seen working** — and so the expensive multi-lens exit runs once, after the operator's feedback is in, not before it.
+
+**Concurrency is capped on purpose.** Pass `maxParallel` (default **2**) to every `phase-wave` — a full fan-out of builders (each installing dependencies + running tests in its worktree) can crash the operator's machine, and the operator may be running another project's session concurrently. A wave that runs longer beats a wave that takes the machine down; never raise it above 3 without the operator asking.
 
 **Validation is AI-first AND local-first** (tenets *The agent validates first; the human does final acceptance* + *Local-first testability*). `validator` drives the entire verification surface — code-level tests **and** the acceptance scenarios (gate G1), including the UI driven live and the real-use dogfood — to green **on the local stack first**, and only deploys for the **final confirm** once local is green. **Deploying to verify is the anti-pattern this avoids** — the deploy round-trip is slow and re-burns work each iteration; per-feedback-round verification runs locally, the deploy target is the last step, not the loop. The operator's only *validation* role is the **final acceptance pass at G9**, on an already-green build. (The human *authorization* gates — go/no-go, merge — are by design, not debugging.)
 
@@ -78,9 +97,9 @@ Updated: <ISO timestamp>
 - [ ] (FB-1) raise the iteration cap — exit-review feedback · files: `src/budgets.ts`
 ```
 
-Markers: `[ ]` pending · `[>]` in progress · `[x]` done · `[!]` blocked (one-line reason). Keep each line to a phrase; if you can't, the chunk is too big — split it. Keep `files:` globs tight enough that two chunks never claim the same path (overlapping ownership makes recovery ambiguous and breaks parallel-wave isolation).
+Markers: `[ ]` pending · `[>]` in progress · `[x]` done · `[!]` blocked (one-line reason). A line may carry trailing ` · hard` (dispatch on the stronger model) and/or ` · review-first` (post-integrate spot-review) flags — **the flags live in the ledger, not just the entry prose**, because you rebuild wave dispatches from the ledger after a crash. Keep each line to a phrase; if you can't, the chunk is too big — split it. Keep `files:` globs tight enough that two chunks never claim the same path (overlapping ownership makes recovery ambiguous and breaks parallel-wave isolation).
 
-**Who writes it:** `phase-entry` writes the initial ledger (one `[ ]` per planned chunk + the backlog pull). During a wave, the **`phase-wave` integrator** flips a chunk to `[x]` in the *same commit* as that chunk's code (the recovery checkpoint) — you don't hand-edit the ledger mid-wave. *You* add `(FB-n)` lines when triaging operator feedback.
+**Who writes it:** `phase-entry` writes the initial ledger (one `[ ]` per planned chunk + the backlog pull). During a wave, the **`phase-wave` integrator** flips a chunk to `[x]` in a ledger-flip commit immediately after that chunk's merge (the recovery-checkpoint pair — a crash between the two is reconciled by crash recovery) — you don't hand-edit the ledger mid-wave. *You* add `(FB-n)` lines when triaging operator feedback.
 
 ## Resuming a phase + crash recovery
 
@@ -105,17 +124,19 @@ On **every** `/phase-builder <n>` invocation, before anything else:
 
 1. **Triage operator feedback first** (always). Scan `phase-<n>-operator-steps.md` + the exit review's *Operator notes & feedback* for un-triaged `> FEEDBACK:` notes. Convert each (with the operator) into a current-phase `(FB-n)` ledger line, a backlog item, or a checked-off resolution. New `(FB-n)` lines are build work.
 2. **Build mode** — if any build / `(FB-n)` line is open and not purely operator-blocked, run the next wave (collect its open chunks → `phase-wave`).
-3. **Exit mode** — once build work is done (or only operator-gated lines remain), enter the exit loop: the exit review already exists (the DRAFT skeleton from entry), so resume its gate ledger from the first non-✅/➖ gate. The modes interleave: exit feedback → `(FB-n)` → build mode → back to exit, re-running the touched gates, appending a *Review iterations* entry. The loop ends only when every gate (G1–G11) is ✅/➖ and the operator merges the PR — the merge commit completes the phase (no G12 checkbox).
+3. **Validate mode (pre-acceptance)** — once build work is done, dispatch `validator` (one agent) for the local scenario run + evidence pack, record provisional G1 rows (🟦), and hand the operator the acceptance package. **Do not start `phase-exit` until the operator has signed off** — their feedback is build work (`(FB-n)` → build mode → re-validate), and running the multi-lens exit before it means running it twice.
+4. **Exit mode** — after acceptance sign-off: the exit review already exists (the DRAFT skeleton from entry), so resume its gate ledger from the first non-✅/➖ gate (pass `skipValidate: true` iff the tip is unchanged since the green validate). The modes interleave: late findings → `(FB-n)` → build mode → re-validate → back to exit, re-running the touched gates, appending a *Review iterations* entry. The loop ends only when every gate (G1–G11) is ✅/➖ and the operator merges the PR — the merge commit completes the phase (no G12 checkbox).
 
 ## The operator seams (what YOU do directly)
 
 These are the only places you act yourself rather than via a workflow:
 
 - **Entry go/no-go** — after `phase-entry` returns, present the entry review path, the ledger (planned chunks vs backlog-pulled), the operator-steps gestures, the seeded exit skeleton, and the plan summary. **Wait** — don't auto-proceed even if it looks clean.
-- **Driving the build loop** — read the ledger, assemble each wave's open chunks, invoke `phase-wave`, read its summary, re-dispatch `needsAttention` chunks (route a genuinely hard one with `chunk.hard=true` so the wave runs it on a stronger model), surface blockers.
-- **Recording exit verdicts** — after `phase-exit` returns, **you** write its verdicts into `phase-<n>-exit.md` (you are the single writer of the resumable gate state, so it never races) and commit each gate transition with the work that moved it.
-- **G9 acceptance** — show the operator the green gate ledger and ask "what's not working" *before* sign-off; triage each note (re-entry step 1).
-- **G10 backlog** — the *Proposed backlog items* table (from `reviewer-tenets`/exit findings) is operator-approved, then appended to `docs/BACKLOG.md` as `accepted` (next `B-NNN` ids). Completeness gate: every surfaced-but-unfinished item is a row.
+- **Driving the build loop** — read the ledger, assemble each wave's open chunks, invoke `phase-wave` (always with `maxParallel`, default 2), read its summary, **triage `spotFindings` before dispatching the next wave**, re-dispatch `needsAttention` chunks (diagnose first, then a sharpened brief — root cause, files, what was tried, what not to attempt; `chunk.hard=true` only for genuinely architectural problems, since a stronger model doesn't fix a vague brief), surface blockers.
+- **The pre-acceptance validate + G9 seam** — after the last wave: dispatch `validator` for the local scenario run + **evidence pack** (screenshots of every touched surface, run links, terminal-success proof), record provisional G1 rows, then hand the operator a curated acceptance package — what was validated (with the evidence), what's ⛔ and why — and ask "what's not working?" **before** any exit workflow runs. Triage every note into an `(FB-n)`; loop build → re-validate until sign-off. The operator must never be the one who discovers a broken screen.
+- **Recording exit verdicts** — after `phase-exit` returns, **you** write its verdicts into `phase-<n>-exit.md` (you are the single writer of the resumable gate state, so it never races) and commit each gate transition with the work that moved it. That includes `doc-syncer`'s G7 doc edits — the workflow's doers don't commit, so **commit their reconciled docs with the G7 transition**; never leave them stranded in the working tree.
+- **G9 recording** — G9's *work* happens at the pre-acceptance seam above; at exit you just record it: the acceptance pass ran, every note triaged to an `(FB-n)`/backlog/resolved state. If any note is still open, G9 stays 🟦 and you're back in build mode.
+- **G10 backlog** — the *Proposed backlog items* table (from `reviewer-tenets`/exit findings) is operator-approved, then appended to `docs/BACKLOG.md` as `accepted` (ids per the backlog's convention). Completeness gate: every surfaced-but-unfinished item is a row. **Every row's Phase target must be a real, still-upcoming phase or a named milestone (`N/A` allowed)** — never free text or an already-merged phase, or the entry-review round-trip can never pull it (a silently-orphaned row).
 - **G11 PR (the terminal gate) + operator merge — closeout is pre-staged on the PR branch, NEVER a follow-up PR.** G11 is the *last* gate ledger row; there is **no G12 "PR merged" checkbox** (a post-merge ✅ on a protected default branch would force a second closeout PR — so the merge is recorded by git, not by a doc checkbox). Flow: confirm with the operator (publishing is shared-state — never silent); **then — BEFORE you push — run the FULL CI-mirroring gate sweep locally on the FINAL branch state and only push once it is all-green** (the `gate-check` skill, which runs the sweep from `docs/PROJECT.md`). This is **not** redundant with the per-wave verify or the exit-review gates: those ran on an *earlier* commit, and everything that landed after them — every FB round, the default-branch merge, the relabels — is **un-swept** until you re-run the whole suite on the tip. A CI gate failing on the PR that a local sweep would have caught is a process miss, not bad luck. Only once the final tip is locally green: push `phase/<n>`, open the PR to the default branch titled `Phase <n>: <theme>`. **Then, with the PR number in hand, make the final *closeout commit* on `phase/<n>` itself and push it to the same PR branch** — lift the exit review's DRAFT marker, mark **G11 ✅** ("PR #M opened; closeout staged"), and bump any status doc to read as it should *after* merge (written so the merge makes it true). (The closeout commit is doc-only so it doesn't need a re-sweep — but if it ever touches code, re-sweep.) All mechanical CI gates must pass — fix-on-branch, never merge red, never disable a gate. The operator merges the now-complete PR (don't auto-merge / admin-override); **that merge completes the phase — the merge commit is the record, and there is nothing left to edit on the default branch, so no closeout branch/PR is ever created.** (Anti-pattern, do not do: a G12/"merged" ✅ or any DRAFT/status edit *after* the merge — a protected default branch forces a second closeout PR. Stage everything in the PR before the merge.)
 
 ## Output locations
@@ -124,7 +145,8 @@ These are the only places you act yourself rather than via a workflow:
 |---|---|---|
 | Entry | Phase branch | `phase/<n>` cut from the latest default branch |
 | Entry | Entry review · ledger · operator-steps · exit skeleton · backlog pull | `docs/phase-reviews/phase-<n>-{entry,tasks,operator-steps,exit}.md` + `docs/BACKLOG.md` (committed in one checkpoint) |
-| Build | Code + tests | wherever your source lives (atomic per-chunk commits on the branch) |
+| Build | Code + tests | wherever your source lives (per-chunk merges on the branch, each paired with its ledger flip) |
+| Validate | Evidence pack (the operator's acceptance handoff) | `docs/phase-reviews/assets/phase-<n>/` (committed with the provisional G1 rows) |
 | Exit | Exit review (gate ledger G1–G11, resumable) | `docs/phase-reviews/phase-<n>-exit.md` |
 | Exit | Backlog push · Merge PR | `docs/BACKLOG.md` · PR `phase/<n>` → default branch |
 
@@ -134,9 +156,15 @@ These are the only places you act yourself rather than via a workflow:
 
 - **Doing work inline instead of dispatching a workflow.** If you find yourself reading test output or build logs into your own context, stop — that's the context-burn trap. Dispatch the workflow; read its summary.
 - **Re-reading changed files to "verify" a workflow.** A committed ledger line + the workflow's structured verdict is the evidence. Open a file only to resolve a specific doubt.
+- **A subagent grinding instead of escalating** (the verify-agent-churned-an-hour failure). Lower agents are scoped to fail fast and return a crisp blocker; if one churns silently it defeats the design. Welcome an early blocked/`needsAttention` return and help it reason (answer / re-scope / split / re-dispatch hard) — never expect a small-model agent to brute-force a wall, and if a workflow runs unusually long with no return, inspect it rather than wait.
 - **Relying on the workflow journal for crash recovery.** It's same-session only. Recover from git + the ledger and re-invoke the wave fresh on the open chunks.
 - **`git reset --hard` with a dirty tree** — never; use `--soft`/`--mixed` + `git restore --staged`.
 - **Skipping the entry go/no-go** because the plan looks clean — that defeats the gate.
+- **Running the multi-lens `phase-exit` before the operator's acceptance pass.** The exit is the expensive stage; the pre-acceptance validate + evidence handoff exists so operator feedback lands *first* and the exit runs once. Exit-before-acceptance means running it again after every feedback round.
+- **Handing the operator an unseen UI.** A UI-touching phase reaches the acceptance seam only after `validator` has rendered every touched surface and captured the evidence pack — the operator reviews screens the agent has already seen working, never discovers a blank/unstyled page.
+- **Uncapped wave fan-out.** Always pass `maxParallel` (default 2) — a machine-crashing wave loses more time than serialization ever costs, and the operator may have a second project's session running.
+- **Routing `.claude/` harness fixes through the phase machinery.** A broken workflow script / agent definition is tooling, not product code — backlogging it to a phase (especially a finished one) strands it and forces every later phase to re-carry the workaround from memory. Fix it as a **direct operator-approved commit** the moment it bites; the phase cycle is for product slices.
+- **Proposing backlog rows with an unpullable Phase target.** Free text ("fast-follow", "the billing epic") or an already-merged phase can never be pulled by an entry review — validate every G10 target against the real roadmap.
 - **Putting validations or gates in the task ledger.** Validations are gate G1; the gates G1–G11 live in the exit review. The ledger is build chunks + `(FB-n)` only.
 - **Looping the build on operator-gated blockers** instead of entering exit mode — when only `[!]`/operator-gated lines remain, the build is as done as it can be; enter the exit loop and surface the gestures in operator-steps.
 - **Merging with red CI or a disabled gate** — fix-on-branch; the mechanical gates are the floor of `docs/REVIEW.md`.

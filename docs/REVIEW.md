@@ -1,6 +1,6 @@
 # Review system — building against the tenets
 
-Every change is reviewed against the principles in [`TENETS.md`](TENETS.md) (north stars + design tenets) at several cadences, each with a different cost/depth tradeoff. The cheap checks run constantly; the deep ones gate each phase.
+Every change is reviewed against the principle files — [`NORTH_STARS.md`](NORTH_STARS.md) (priorities) + [`TENETS.md`](TENETS.md) (product invariants) + [`ENGINEERING_TENETS.md`](ENGINEERING_TENETS.md) (engineering invariants) — at several cadences, each with a different cost/depth tradeoff. The cheap checks run constantly; the deep ones gate each phase. Reviews **read all three files**; scoring stars from one file or checking violations from only one tenet file is a named failure mode.
 
 | Layer | Mechanism | Cost | Catches |
 |---|---|---|---|
@@ -40,9 +40,21 @@ Before the operator is asked to look at anything:
 1. **The agent runs the full verification suite — LOCAL-FIRST, including the UI, then the deployed target as the final confirm.** The whole stack boots locally with one command (see [`PROJECT.md`](PROJECT.md#commands)); per-iteration validation happens there. Deploying just to verify is the anti-pattern this forbids — the round-trip is slow and re-burns work each iteration; the deployed target is the *last* step, not the loop. UI-touching work is not "validated" until a browser (or the real surface) has actually exercised it. End-to-end specs must run against a **booted local stack before the PR** — "deferred to CI" is not a substitute, because locator/path/origin bugs surface *only* when specs run against a real stack.
 2. **Failures are diagnosed, fixed, and captured by the agent — not bounced to the operator.** When the agent finds a broken scenario it owns the loop: diagnose the root cause, fix it, re-run to green, and **capture a task** for any durable follow-up (a `(FB-n)` ledger line if it's this-phase work; a [`BACKLOG.md`](BACKLOG.md) row if it's future-phase). It reports *what it did* afterward; it does not narrate every step and wait.
 3. **`⛔ operator-gated` shrinks to the irreducibly human.** A scenario is blocked only when it *genuinely* needs a human the agent cannot stand in for — a hardware key enrollment, an external install/approval click under the operator's own account, a real-payment step. "It's easier to ask the operator" is **not** a reason to mark a scenario blocked — that's the tenet violation this section exists to prevent.
-4. **Only then: the operator's acceptance pass (gate G9).** Once G1 is green-or-honestly-blocked, the operator gets a curated handoff — "here's what I validated end-to-end; here's the short list that needs your eyes" — and does real acceptance testing. Their notes become `(FB-n)` tasks the agent builds.
+4. **Only then: the operator's acceptance pass (gate G9) — at the pre-exit seam, before the heavy exit.** Once the build is done, a **single pre-acceptance validation run** (`validator`: every scenario driven locally to green + an **evidence pack** — screenshots of every touched surface, run links, terminal-success proof) produces the curated handoff — "here's what I validated, with the evidence; here's the short list that needs your eyes" — and the operator does real acceptance testing **before** the multi-lens exit workflow runs. Their notes become `(FB-n)` tasks the agent builds, then re-validates. The exit workflow runs once, after sign-off (carrying the validate evidence forward if the tip is unchanged) — not before every feedback round.
 
-This does **not** weaken any gate. It changes *who validates and in what order*: the agent first and exhaustively, the operator last and for acceptance.
+This does **not** weaken any gate. It changes *who validates and in what order*: the agent first and exhaustively, the operator on an already-seen-working build, and the expensive exit sweep last and once.
+
+### UI validation is tiered (fast where it runs often, thorough where it runs once)
+
+Full browser suites are too slow to run per-chunk, and skipping UI validation entirely is how broken screens reach the operator. Three tiers, by frequency:
+
+| Tier | When | What | Cost |
+|---|---|---|---|
+| **1 — render proof** | Every UI chunk, in-wave | The builder boots the app and proves the changed surface **renders** — a headless screenshot or DOM assertion of the touched route, zero console errors. Not a test suite; an existence proof. | seconds–a minute |
+| **2 — golden path + evidence pack** | Once per phase, pre-acceptance | `validator` drives the phase's Verification scenarios end-to-end (golden paths, not the full matrix) and captures evidence of every touched surface for the operator's acceptance handoff. | minutes |
+| **3 — full e2e suite** | Exit + CI only | The whole end-to-end suite against a booted stack and, if the project deploys, the real target. | the slow one — deliberately run once |
+
+Keep the suite small on purpose: one spec per phase Verification scenario plus the critical edges — a golden-path suite that stays fast is worth more than an exhaustive one nobody waits for. Tier 1 catches the "blank page / unstyled / 500" class the moment it's introduced; Tier 2 is what the operator sees; Tier 3 is the regression floor.
 
 **What "validated" must mean — three hard rules.** A scenario is *not* green until the real end-to-end path ran to **terminal success** with the **user-visible outcome confirmed**:
 
@@ -54,7 +66,7 @@ This does **not** weaken any gate. It changes *who validates and in what order*:
 
 Block the start of a phase on this. ~30 minutes; saved at `docs/phase-reviews/phase-<n>-entry.md`. (Done by phase-builder Stage 1.)
 
-- **Re-read [`TENETS.md`](TENETS.md).** Note any tenet this phase risks bending, and why.
+- **Re-read the principle files** ([`NORTH_STARS.md`](NORTH_STARS.md) + [`TENETS.md`](TENETS.md) + [`ENGINEERING_TENETS.md`](ENGINEERING_TENETS.md)). Note any tenet this phase risks bending, and why.
 - **Scope check.** Read the phase doc end-to-end. Anything that doesn't move at least one north star forward? Cut it or justify it in writing.
 - **Open questions.** Resolve every blocking open question (from the phase doc or [`PLAN.md`](PLAN.md)) before starting.
 - **Risk register.** Skim the architecture risks. Any risk materially worse than when written? Add new ones if so.
@@ -84,7 +96,7 @@ The eleven gates:
 | G6  | **Local-testability proof** | Every gate shipped this phase was exercised locally before deploy via its bypass. |
 | G7  | **Surprises captured + docs synced** | What was learned that wasn't in the plan is written into the right doc; the doc tree reflects what was built. |
 | G8  | **Recurring issues → mechanized or backlogged** | Patterns that bit repeatedly became a gate, a skill, or a runbook entry (or a backlog row to build one). |
-| G9  | **Operator notes/feedback triaged + addressed** | The operator's final acceptance pass; every note triaged into a task, a backlog row, or a resolved note. |
+| G9  | **Operator notes/feedback triaged + addressed** | The operator's acceptance pass, **run at the pre-exit seam** — after the pre-acceptance validation run (scenarios + evidence pack) and *before* the multi-lens exit workflow. Every note triaged into a task, a backlog row, or a resolved note; at exit this gate just records that it happened. |
 | G10 | **Backlog reconciled (completeness gate)** | Every item this phase surfaced but didn't finish is a backlog row with a target phase. See below. |
 | G11 | **PR opened (operator go-ahead) + closeout staged on the PR** | Terminal gate. The full CI-mirroring sweep is green on the *final* tip; the PR is open; the closeout commit is staged on the PR branch. |
 
@@ -98,6 +110,8 @@ The per-phase ledger holds the *current* phase's tasks and dies with the phase. 
 |---|---|---|
 | **Exit → backlog** | Exit review | The *Proposed backlog items* table is operator-approved and its rows appended to the backlog as `accepted`, each with a target **Phase**. |
 | **Backlog → ledger** | Entry review | `/phase-builder <n>` pulls every `accepted` row whose **Phase** is `<n>` into that phase's task ledger and marks the rows `pulled`. |
+
+Because the pull matches on the Phase value, a target must be a **real, still-upcoming phase** or `N/A` — never free text ("fast-follow", "the billing epic") or an already-finished phase, which the round-trip can never pull (a silently-orphaned row). Harness/tooling fixes (`.claude/**`) don't ride the round-trip at all: they ship as direct operator-approved commits when they bite (see the phase-builder skill's failure modes).
 
 This is the mechanism behind *every item the system does is a task somewhere* (the *Phase work is a living task ledger* and *Work is a re-orderable portfolio* tenets): future phases need not be broken into tasks yet — deferred work accumulates in the backlog tagged with its phase, and the phase's entry review converts it into ledger tasks the moment that phase starts.
 
