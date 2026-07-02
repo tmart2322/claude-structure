@@ -8,11 +8,13 @@
 
 ## Tenets
 
-Canonical: **[`TENETS.md`](TENETS.md)** — north stars (priority order) + design tenets (invariants) + review cadence. **Read it before starting a phase; re-read after.** Lower-numbered north stars win when two conflict; design tenets veto options regardless.
+Canonical: **[`NORTH_STARS.md`](NORTH_STARS.md)** (priorities, ordered — lower wins) + **[`TENETS.md`](TENETS.md)** (your product invariants + how the layers interact) + **[`ENGINEERING_TENETS.md`](ENGINEERING_TENETS.md)** (the transferable engineering invariants). **Read all three before starting a phase; re-read after.** North stars choose winners; tenets (either file) veto options.
 
 ## Doc index
 
-- [`TENETS.md`](TENETS.md) — the principles (north stars + design tenets)
+- [`NORTH_STARS.md`](NORTH_STARS.md) — the priorities (ordered; lower wins)
+- [`TENETS.md`](TENETS.md) — your product invariants + the principle-system front door
+- [`ENGINEERING_TENETS.md`](ENGINEERING_TENETS.md) — the transferable engineering invariants
 - [`PROJECT.md`](PROJECT.md) — the project profile: stack, layout, commands, invariants (fill this in first)
 - [`REVIEW.md`](REVIEW.md) — the review system: mechanical gates, per-phase entry/exit gates, the backlog round-trip
 - [`BACKLOG.md`](BACKLOG.md) — cross-phase task registry: every surfaced-but-undone item with a target phase

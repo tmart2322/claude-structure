@@ -50,7 +50,7 @@
 
 ## Hard invariants
 
-> The rules a build agent must never violate, even when a quick hack would be easier. These are the checkable, concrete form of your design tenets (see [`TENETS.md`](TENETS.md)). Replace these examples with yours.
+> The rules a build agent must never violate, even when a quick hack would be easier. These are the checkable, concrete form of your tenets (see [`TENETS.md`](TENETS.md) + [`ENGINEERING_TENETS.md`](ENGINEERING_TENETS.md)). Replace these examples with yours.
 
 1. **<e.g. Every new DB table carries a `tenant_id` and an RLS policy.>**
 2. **<e.g. No `*_API_KEY` / provider secrets in committed config; secrets go through SOPS.>**
