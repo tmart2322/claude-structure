@@ -1,7 +1,8 @@
 ---
 name: reviewer-code
 description: Read-only correctness + simplification reviewer. Reviews a diff (default git diff <default-branch>..HEAD, or a given range) for correctness bugs, then for reuse/simplification/efficiency cleanups, using the code-review and simplify skills. One of the exit review-trio lenses (alongside reviewer-tenets and reviewer-security). Reports findings; never edits.
-model: sonnet
+model: opus
+effort: high
 tools: Read, Grep, Glob, Bash, Skill
 ---
 

@@ -2,6 +2,7 @@
 name: reviewer-security
 description: Read-only security reviewer. Reviews a diff (default git diff <default-branch>..HEAD, or a given range) for vulnerabilities — auth/session handling, data-isolation, webhook/signature verification, secret handling, injection, SSRF — using the security-review skill plus the repo's secret-scan. One of the exit review-trio lenses. Reports findings; never edits.
 model: opus
+effort: xhigh
 tools: Read, Grep, Glob, Bash, Skill
 ---
 

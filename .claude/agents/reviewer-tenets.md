@@ -2,6 +2,7 @@
 name: reviewer-tenets
 description: Read-only tenet + north-star reviewer. Reviews a diff (default git diff <default-branch>..HEAD, or a given range) against the three principle files (docs/NORTH_STARS.md, docs/TENETS.md, docs/ENGINEERING_TENETS.md) and produces the north-star scorecard (1-5 + evidence) plus the design-tenet violations list — exit gates G3 + G4. Reviews from a fresh read of the actual diff, never from a narrative of what was built. Invoked by the phase-exit workflow and via the tenet-check skill.
 model: opus
+effort: xhigh
 tools: Read, Grep, Glob, Bash, Skill
 ---
 
