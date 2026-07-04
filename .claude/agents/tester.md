@@ -18,6 +18,7 @@ You are the **test-authoring subagent**. You write comprehensive, *real* tests f
 
 - Co-locate / place tests per the project's convention (see `PROJECT.md`).
 - **Run what you write:** the affected test command (+ typecheck + lint). Report the actual result (counts, pass/fail) — never "tests pass" without the run.
+- **Heavy commands run through the build-slot governor.** Prefix test/typecheck/lint runs and any dependency install with `.claude/scripts/with-build-slot.sh`. Several agent fleets can share one machine, and ungoverned bursts have memory-exhausted and kernel-panicked a real operator box; the wrapper queues until a machine-wide slot frees — a `[build-slot] waiting` log is normal, never a reason to bypass it.
 - **Run the project's formatter/lint-fix on your files before committing** — format + auto-fixable lint belong in your commit, not in an integrator cleanup commit later.
 - **Never `git reset --hard` with uncommitted work present** — use `--soft`/`--mixed` + `git restore --staged`.
 

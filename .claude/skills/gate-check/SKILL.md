@@ -13,7 +13,7 @@ It's common to validate a change with "run the tests" + the sandbox, while the *
 
 ## The sweep (mirror your CI config)
 
-Read the command table in **`docs/PROJECT.md`** and run, in order, collecting **every** result (don't stop at the first red — report them all):
+Read the command table in **`docs/PROJECT.md`** and run, in order, collecting **every** result (don't stop at the first red — report them all). Run each command through **`.claude/scripts/with-build-slot.sh <cmd>`** — the machine-global load governor; it queues the burst when another repo's agent fleet has the machine saturated (ungoverned stacking has kernel-panicked a real operator box), and a `[build-slot] waiting` log is normal queuing, not a failure:
 
 1. **Typecheck**
 2. **Lint / format check**  ← the one an aggregate gate command often omits

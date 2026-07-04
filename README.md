@@ -38,6 +38,8 @@ It is **project-agnostic.** Nothing here knows or cares what you're building. Th
 │   │   ├── phase-entry.js            ← survey + plan + commit the Stage-1 checkpoint
 │   │   ├── phase-wave.js             ← build+test+verify chunks in parallel worktrees, then integrate
 │   │   └── phase-exit.js             ← run the automatable exit gates in parallel
+│   ├── scripts/
+│   │   └── with-build-slot.sh        ← machine-global load governor: heavy toolchain bursts queue across repos
 │   └── agents/                       ← the doer subagents the workflows fan out to
 │       ├── builder.md  ui-builder.md  tester.md
 │       ├── reviewer-tenets.md  reviewer-code.md  reviewer-security.md
@@ -248,7 +250,7 @@ The disciplines in these files aren't arbitrary — each one is a scar from a re
 - **Nothing important lives only in prose.** Every surfaced-but-undone item becomes a backlog row with a target phase, or it gets lost.
 - **Cite principles by name, not number.** Numbers are display order and break on reorder; names are stable.
 - **The operator accepts a build the agent has already seen working.** The acceptance pass runs at a dedicated pre-exit seam, off a scenario run + evidence pack (screenshots, run links) — the operator must never be the one who discovers a blank page, and the expensive exit workflow runs once, *after* their feedback, not before every round.
-- **Cap wave fan-out; run longer, not hotter.** Parallel builders each install dependencies and run tests; an uncapped wave can take the machine down (`maxParallel`, default 2).
+- **Cap wave fan-out; run longer, not hotter — and govern the machine, not just the session.** Parallel builders each install dependencies and run tests; an uncapped wave can take the machine down (`maxParallel`, default 2). But per-session caps don't compose: two repos' fleets, each individually "safe", memory-exhausted and kernel-panicked a real 16 GB machine. Heavy toolchain bursts therefore also queue through `.claude/scripts/with-build-slot.sh` — a machine-global flock semaphore (one reserved slot per repo for liveness + a shared pool; the kernel releases a dead holder's slot instantly, so no stale locks; a timeout degrades to ungoverned-with-a-warning rather than deadlocking a phase). It also caps per-run memory (Node heap, vitest workers) so one slot has a predictable footprint.
 - **Tier UI validation by frequency.** Render-proof per chunk (seconds), golden-path + evidence pack per phase (minutes), the full e2e suite only at exit/CI — slow suites stop being the reason screens go unseen.
 - **Spot-review the lock-in chunks the moment they integrate.** The exit review-trio sees the whole diff, but an auth/isolation/money chunk flagged at entry gets a targeted security + correctness pass in-wave — a HIGH found four waves later has been built on four times.
 - **Doers fail fast; the orchestrator helps them reason.** Two attempts at the same wall, then a rich blocker up — and the orchestrator diagnoses and re-dispatches with a sharpened brief instead of blind-retrying or escalating the model to compensate for a vague one.

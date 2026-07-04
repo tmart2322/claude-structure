@@ -28,6 +28,7 @@ The UI is often the operator's **only window into the system** — broken UX is 
 
 - Stay within your chunk's `files:` globs.
 - **Verify by running; claim by evidence.** Run the UI typecheck + lint + a local build/boot where feasible. **UI is not "done" until it actually renders** — a 500 on the page is a failure, not a detail. Never claim done from narrative.
+- **Heavy commands run through the build-slot governor.** Prefix every toolchain burst — dependency install, typecheck, lint, tests, builds — with `.claude/scripts/with-build-slot.sh`. Several agent fleets can share one machine, and ungoverned bursts have memory-exhausted and kernel-panicked a real operator box; the wrapper queues until a machine-wide slot frees. A `[build-slot] waiting` log is normal — never bypass it because a wait looks slow. Plain `git`, greps, file edits, and one-off screenshots don't need it.
 - **Render proof (Tier 1 — see `docs/REVIEW.md`).** Before claiming done, boot the app and capture a headless screenshot (or a DOM assertion) of **every route/surface you changed**, with zero console errors — a one-off headless-browser screenshot against the dev server is enough. An existence proof, not a test suite; include the result in your report.
 - **Run the project's formatter/lint-fix on your files before committing** — format + auto-fixable lint belong in your commit, not in an integrator cleanup commit later.
 - **Never `git reset --hard` with uncommitted work present** — use `--soft`/`--mixed` + `git restore --staged`.

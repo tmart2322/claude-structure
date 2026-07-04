@@ -1,7 +1,7 @@
 export const meta = {
   name: 'phase-wave',
   description:
-    'Build one wave of a phase: build + cover-with-tests + verify each chunk in isolated git worktrees (batched — maxParallel, default 2, caps how many are in flight; full fan-out can crash the operator machine), then a SINGLE serial integrator merges each verified chunk onto the phase branch and flips its ledger line in an immediately-paired commit. The integrator ends with the project gate sweep + lint on the branch tip (merges skip pre-commit hooks), and reviewFirst/hard chunks get a targeted post-integrate security + correctness spot-review. Idempotent — pass only the still-open chunks; landed chunks are skipped by the caller. Returns per-chunk verdicts + merged SHAs + spotFindings.',
+    'Build one wave of a phase: build + cover-with-tests + verify each chunk in isolated git worktrees (batched — maxParallel, default 2, caps how many are in flight; full fan-out can crash the operator machine — and heavy toolchain commands additionally queue through the machine-global build-slot governor, .claude/scripts/with-build-slot.sh, so two repos\' fleets can share one machine without memory-exhausting it), then a SINGLE serial integrator merges each verified chunk onto the phase branch and flips its ledger line in an immediately-paired commit. The integrator ends with the project gate sweep + lint on the branch tip (merges skip pre-commit hooks), and reviewFirst/hard chunks get a targeted post-integrate security + correctness spot-review. Idempotent — pass only the still-open chunks; landed chunks are skipped by the caller. Returns per-chunk verdicts + merged SHAs + spotFindings.',
   phases: [
     { title: 'Build', detail: 'builder / ui-builder per chunk in a worktree' },
     { title: 'Cover', detail: 'tester authors + runs tests for each chunk' },
@@ -46,6 +46,11 @@ phase('Build')
 // Each chunk flows build -> cover -> verify INDEPENDENTLY (pipeline, no barrier) — but chunks ENTER
 // in batches of maxParallel (default 2). A full fan-out of builders (each installing deps + running
 // typecheck + tests in its worktree) can crash the operator's machine; run longer, not hotter.
+// maxParallel only governs THIS session — it can't see another repo's fleet on the same machine
+// (two individually-"safe" repos have memory-exhausted and kernel-panicked a real 16 GB box).
+// That cross-repo half is the build-slot governor: agents prefix heavy commands with
+// .claude/scripts/with-build-slot.sh, which queues machine-wide (one reserved slot per repo +
+// a shared pool; flock-based, crash-safe).
 const built = []
 for (let batchStart = 0; batchStart < chunks.length; batchStart += maxParallel) {
   const batchResults = await pipeline(
@@ -61,12 +66,14 @@ for (let batchStart = 0; batchStart < chunks.length; batchStart += maxParallel) 
           `the phase branch ${branch}, so it does NOT yet contain this phase's prior waves. Before anything else:`,
           `  1. \`git reset --hard ${branch}\` — your worktree is freshly created with NO uncommitted work, so this`,
           `     is safe; it syncs you to the ${branch} tip so prior waves' integrated code is visible.`,
-          `  2. Install dependencies in THIS worktree if the project needs them (the install command is in`,
-          `     docs/PROJECT.md; dependency dirs are gitignored and absent in a fresh worktree).`,
+          `  2. Install dependencies in THIS worktree if the project needs them, running the install as`,
+          `     \`.claude/scripts/with-build-slot.sh <install command>\` (the command is in docs/PROJECT.md; dependency`,
+          `     dirs are gitignored and absent in a fresh worktree). The with-build-slot.sh prefix is the machine-global`,
+          `     load governor — use it on EVERY heavy command; waiting on it is normal.`,
           `Then build. Brief: ${chunk.brief}`,
           `You own ONLY these files: ${(chunk.files || []).join(', ')} — do not touch any other path.`,
           `Read docs/PROJECT.md for the commands + invariants. Implement it, run your verification (typecheck +`,
-          `lint + the affected tests), run the project's formatter/lint-fix on your files, then COMMIT just your`,
+          `lint + the affected tests, each under with-build-slot.sh), run the project's formatter/lint-fix on your files, then COMMIT just your`,
           `files in this worktree with a lightweight message ("${chunk.id}: <what>"). Do NOT touch ${branch}, do`,
           `NOT push, do NOT merge/cherry-pick — integration is a separate serial step.`,
           `Report status, the commit SHA, files touched, the verification commands + result, any blocker, and`,
@@ -94,7 +101,9 @@ for (let batchStart = 0; batchStart < chunks.length; batchStart += maxParallel) 
             `Author + run tests for chunk "${chunk.id}" (files: ${(chunk.files || []).join(', ')}). ` +
               `FIRST run, as a standalone command, \`cd ${result.worktreePath}\` — that is the build's worktree, which ` +
               `already holds the chunk's code and installed dependencies; do ALL work there (cwd persists between commands). ` +
-              `Prefer real-boundary integration tests over mocks; note what a mock can't catch. Run the project's ` +
+              `Prefer real-boundary integration tests over mocks; note what a mock can't catch. Run test/typecheck/lint ` +
+              `commands through \`.claude/scripts/with-build-slot.sh\` (the machine-global load governor — waiting on it ` +
+              `is normal). Run the project's ` +
               `formatter/lint-fix on your files, then add/amend a commit IN THAT WORKTREE. Report the test-run result, ` +
               `the final commit SHA, and worktreePath from \`git rev-parse --show-toplevel\`.`,
             { agentType: 'tester', label: `test:${chunk.id}`, phase: 'Cover', schema: CHUNK_RESULT },
@@ -126,7 +135,8 @@ for (let batchStart = 0; batchStart < chunks.length; batchStart += maxParallel) 
         ? agent(
             `Run per-chunk verification for "${chunk.id}". FIRST run, as a standalone command, \`cd ${result.worktreePath}\` ` +
               `— the chunk's worktree (its code + dependencies are present); do ALL work there. Then run: typecheck + lint + ` +
-              `the affected tests (commands in docs/PROJECT.md). Report pass/fail per check + the failing output for any red. ` +
+              `the affected tests (commands in docs/PROJECT.md), each through \`.claude/scripts/with-build-slot.sh\` ` +
+              `(machine-global load governor — time spent waiting on a slot is not a hang). Report pass/fail per check + the failing output for any red. ` +
               `Do not fix anything; report. FAIL FAST: one clean run per check — never loop a check or wait out a hang ` +
               `(bound commands with a timeout); report the first clear result, including "hung/timed out", rather than grinding.`,
             {
@@ -174,8 +184,9 @@ const integrationResult = ok.length
         `  2. Merge its new commits onto ${branch}:  git merge --no-ff <worktree-branch>  (keeps the chunk's build+test commits).`,
         `  3. On ${branch}, edit docs/phase-reviews/phase-${phaseId}-tasks.md to flip that chunk's line from [>] (or [ ]) to [x],`,
         `     and commit the ledger flip immediately — the recovery checkpoint pairing the merged code with its ledger line.`,
-        `After ALL chunks are merged, run the project's full gate sweep + lint on the ${branch} tip (commands in`,
-        `docs/PROJECT.md; git merge skips the pre-commit hook, so this is the only per-wave enforcement). Report the`,
+        `After ALL chunks are merged, run the project's full gate sweep + lint on the ${branch} tip, each command`,
+        `under \`.claude/scripts/with-build-slot.sh\` (commands in docs/PROJECT.md; git merge skips the pre-commit`,
+        `hook, so this is the only per-wave enforcement). Report the`,
         `sweep result; if it is red, do NOT fix anything — report which check failed and which chunk's files it maps to.`,
         `Then run: git worktree prune  (clean the integrated worktrees).`,
         ``,

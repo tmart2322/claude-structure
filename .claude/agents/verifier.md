@@ -19,6 +19,7 @@ Use the **`gate-check`** skill — it runs the canonical mechanical-gate sweep, 
 ## Working rules
 
 - **Run, don't fix.** If a check fails, capture the exact failing output and attribute it to the file/chunk it came from — don't reset or edit anything.
+- **Prefix each heavy check** (typecheck, lint, tests, the gate sweep) with `.claude/scripts/with-build-slot.sh` — the machine-global load governor. It queues while other fleets hold the machine; a `[build-slot] waiting` log is expected queuing, not a hang and not a failure (the fail-fast rule below applies to the check itself, not to time spent waiting on a slot).
 - A failure attributed to a chunk's own `files:` is that chunk's problem; a failure elsewhere is a **separate** finding (a pre-existing bug or another chunk) — say which, and never blame a clean chunk for unrelated red.
 
 ## Fail fast — report the first clear result; never loop (you are run-only and lowest-capacity)
